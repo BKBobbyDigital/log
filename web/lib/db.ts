@@ -1,20 +1,11 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
-import fs from 'node:fs';
+import { conf } from './config';
 
 const DB_PATH = path.join(process.cwd(), '..', 'data', 'tracker.db');
 
-// Read LOCAL_TZ from the project .env so JS and the Python scripts agree on
-// where a day starts. Day boundaries must be local — see README.
-export const LOCAL_TZ = (() => {
-  try {
-    const env = fs.readFileSync(path.join(process.cwd(), '..', '.env'), 'utf8');
-    const m = env.match(/^LOCAL_TZ=(.+)$/m);
-    return m ? m[1].trim() : 'UTC';
-  } catch {
-    return 'UTC';
-  }
-})();
+// JS and the Python scripts must agree on where a day starts — see README.
+export const LOCAL_TZ = conf('LOCAL_TZ', 'UTC');
 
 let _db: Database.Database | null = null;
 function db() {

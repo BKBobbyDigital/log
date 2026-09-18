@@ -1,16 +1,10 @@
 import 'server-only';
-import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { conf } from './config';
 
 const API = 'https://api.themoviedb.org/3';
-
-const KEY = (() => {
-  try {
-    const env = fs.readFileSync(path.join(process.cwd(), '..', '.env'), 'utf8');
-    return env.match(/^TMDB_API_KEY=(.+)$/m)?.[1].trim() ?? '';
-  } catch { return ''; }
-})();
+const KEY = conf('TMDB_API_KEY');
 
 async function get<T>(pathname: string, params: Record<string, string> = {}): Promise<T | null> {
   if (!KEY) throw new Error('TMDB_API_KEY missing from .env');

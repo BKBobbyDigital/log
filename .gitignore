@@ -1,5 +1,7 @@
 # secrets
 .env
+.env.local
+web/.env.local
 
 # the database and anything derived from it — personal data, lives in Turso
 data/*.db
