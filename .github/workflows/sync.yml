@@ -1,0 +1,33 @@
+name: Nightly sync
+
+# 08:30 UTC ~= 4:30am Eastern. GitHub cron is UTC only, so this shifts by an
+# hour across DST — harmless for a job that just refreshes air dates.
+on:
+  schedule:
+    - cron: '30 8 * * *'
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+concurrency:
+  group: nightly-sync       # never let two runs write at once
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install libsql-client
+
+      - name: Refresh air dates, show status and episode lists
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          LOCAL_TZ: ${{ vars.LOCAL_TZ || 'America/New_York' }}
+        run: python scripts/sync.py

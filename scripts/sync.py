@@ -8,9 +8,12 @@ slice of anything stale. Then applies auto-finish and reports what moved.
     python3 scripts/sync.py --dry-run
     python3 scripts/sync.py --limit 50
 """
-import json, os, sqlite3, sys, time, threading
+import json, os, sys, time, threading
 import urllib.request, urllib.error, urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dbconn import connect, tmdb_key
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB   = os.path.join(HERE, 'data', 'tracker.db')
@@ -23,13 +26,7 @@ DRY   = '--dry-run' in sys.argv
 LIMIT = int(sys.argv[sys.argv.index('--limit') + 1]) if '--limit' in sys.argv else None
 
 
-def api_key():
-    for line in open(os.path.join(HERE, '.env')):
-        if line.startswith('TMDB_API_KEY='):
-            return line.split('=', 1)[1].strip()
-    raise SystemExit('TMDB_API_KEY not found in .env')
-
-KEY = api_key()
+KEY = tmdb_key()
 _lock = threading.Lock()
 
 
@@ -147,9 +144,7 @@ def reconcile_episodes(con, mid, tmdb_eps, stats):
 
 
 def main():
-    con = sqlite3.connect(DB)
-    con.execute('PRAGMA journal_mode=WAL')
-    con.execute('PRAGMA foreign_keys=ON')
+    con = connect()
 
     followed = con.execute("""
         SELECT id, tmdb_id FROM media
@@ -259,7 +254,8 @@ def main():
     if not DRY:
         print("\n--- auto-finish ---")
         sys.stdout.flush()
-        os.system('python3 %s --apply' % os.path.join(HERE, 'scripts', 'auto_finish.py'))
+        os.system('%s %s --apply' % (sys.executable,
+                                     os.path.join(HERE, 'scripts', 'auto_finish.py')))
 
 
 if __name__ == '__main__':

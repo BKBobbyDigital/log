@@ -186,7 +186,7 @@ second data source.
 2. ~~Show / movie detail pages~~ — done
 3. ~~Search + add from TMDB~~ — done; the app no longer needs Trakt
 4. ~~Mutations: backdate, bulk season, unmark, status, rating~~ — done
-5. ~~Nightly job~~ — done
+5. ~~Nightly job~~ — done, running on GitHub Actions against Turso
 6. Stats
 7. Full-list routes
 8. **UI pass last** — visual polish, transitions, empty states, PWA install

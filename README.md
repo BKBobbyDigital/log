@@ -62,20 +62,33 @@ and it still never sets the status for you — it just offers the choice.
 - Some TMDB ids from the Trakt export are dead (Mass Effect, 404). Sync names
   them and records a `tmdb_unreachable` row in `import_issue`.
 
+## Where the data lives
+
+Turso (hosted libSQL) is the single source of truth — the live app and every
+script read and write the same database. `scripts/dbconn.py` picks Turso when
+TURSO_DATABASE_URL is set and falls back to `data/tracker.db` otherwise, so
+`--local` still works offline against the old file.
+
+The local file is now a stale snapshot. Do not trust it.
+
 ## Nightly sync
 
-    python3 scripts/sync.py            # refresh + auto-finish
-    python3 scripts/sync.py --dry-run
+Runs automatically via GitHub Actions (`.github/workflows/sync.yml`) at 08:30
+UTC, so it does not depend on any machine being awake. Run it by hand from the
+Actions tab, or locally:
+
+    .venv/bin/python scripts/sync.py            # refresh + auto-finish
+    .venv/bin/python scripts/sync.py --dry-run
+    .venv/bin/python scripts/sync.py --local    # force the old local file
+
+Local runs need the client: `python3 -m venv .venv && .venv/bin/pip install libsql-client`
 
 Refreshes every show you follow (watching / watchlist) plus up to 150 stale
 ones, then runs auto-finish. Each run is logged to `sync_run`; failures name
 the title rather than incrementing a silent counter.
 
-To schedule it on macOS, point the plist at this directory and load it:
-
-    sed "s|REPLACE_WITH_PROJECT_PATH|$PWD|" scripts/com.log.sync.plist \
-      > ~/Library/LaunchAgents/com.log.sync.plist
-    launchctl load ~/Library/LaunchAgents/com.log.sync.plist
+GitHub Actions is the scheduler. `scripts/com.log.sync.plist` remains for
+running it on a Mac instead, but there is no reason to use both.
 
 ## Setup
     cp .env.example .env     # add TMDB_API_KEY and LOCAL_TZ
