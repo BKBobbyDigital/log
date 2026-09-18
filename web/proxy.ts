@@ -15,5 +15,5 @@ export async function proxy(req: NextRequest) {
 
 export const config = {
   // everything except the login route, static assets and the manifest
-  matcher: ['/((?!login|_next/static|_next/image|favicon.ico|icon.svg|manifest.json).*)'],
+  matcher: ['/((?!login|api/health|_next/static|_next/image|favicon.ico|icon.svg|manifest.json).*)'],
 };

@@ -52,10 +52,15 @@ export async function verifySession(cookieValue: string | undefined): Promise<bo
   }
 }
 
-export async function checkPassword(input: string): Promise<boolean> {
+export type PasswordResult = 'ok' | 'wrong' | 'unconfigured';
+
+/** Distinguishes a wrong password from a server that has no password set.
+ *  Both used to render "Incorrect password", which made a misconfigured
+ *  deploy indistinguishable from a typo. */
+export async function checkPassword(input: string): Promise<PasswordResult> {
   const expected = conf('APP_PASSWORD');
-  if (!expected) return false;
-  return timingSafeEqual(input, expected);
+  if (!expected) return 'unconfigured';
+  return timingSafeEqual(input, expected) ? 'ok' : 'wrong';
 }
 
 export const SESSION_COOKIE = COOKIE;
