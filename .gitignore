@@ -1,0 +1,21 @@
+# secrets
+.env
+
+# the database and anything derived from it — personal data, lives in Turso
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.log
+data/raw/
+
+# node
+node_modules/
+.next/
+out/
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+
+# python
+__pycache__/
+*.pyc
