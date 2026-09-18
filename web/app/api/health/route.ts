@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { conf } from '@/lib/config';
+import { conf, looksMasked, nonAscii } from '@/lib/config';
 import { q } from '@/lib/client';
 
 export const dynamic = 'force-dynamic';
@@ -17,6 +17,19 @@ export async function GET() {
     TMDB_API_KEY: Boolean(conf('TMDB_API_KEY')),
     LOCAL_TZ: conf('LOCAL_TZ') || null,
   };
+
+  // Per-value sanity: length and cleanliness only, never the value itself.
+  const checks: Record<string, string> = {};
+  for (const key of ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN', 'AUTH_SECRET', 'APP_PASSWORD']) {
+    const v = conf(key);
+    if (!v) { checks[key] = 'not set'; continue; }
+    const bad = nonAscii(v);
+    checks[key] = looksMasked(v)
+      ? `MASKED VALUE SAVED (${v.length} chars) — re-enter with masking off`
+      : bad
+        ? `non-ASCII at index ${bad.index} (code ${bad.code}) — re-enter`
+        : `ok (${v.length} chars)`;
+  }
 
   let database = 'not attempted';
   try {
@@ -38,6 +51,6 @@ export async function GET() {
 
   return NextResponse.json({
     ok: Object.values(env).every(Boolean) && database === 'ok',
-    deploy, env, database,
+    deploy, env, checks, database,
   });
 }

@@ -1,7 +1,7 @@
 import 'server-only';
 import { createClient, type Client, type InValue } from '@libsql/client';
 import path from 'node:path';
-import { conf } from './config';
+import { conf, looksMasked, nonAscii } from './config';
 
 /** One client for the whole app.
  *
@@ -13,9 +13,29 @@ let _client: Client | null = null;
 export function db(): Client {
   if (_client) return _client;
   const url = conf('TURSO_DATABASE_URL');
-  _client = url
-    ? createClient({ url, authToken: conf('TURSO_AUTH_TOKEN') })
-    : createClient({ url: `file:${path.join(process.cwd(), '..', 'data', 'tracker.db')}` });
+  if (url) {
+    const token = conf('TURSO_AUTH_TOKEN');
+    // Fail with something actionable. Unvalidated, a masked value surfaces as
+    // "Cannot convert argument to a ByteString", which names neither the
+    // variable nor the cause.
+    for (const [name, value] of [['TURSO_DATABASE_URL', url], ['TURSO_AUTH_TOKEN', token]] as const) {
+      if (looksMasked(value)) {
+        throw new Error(
+          `${name} contains masked characters (••••). The value saved in the ` +
+          `host's dashboard is the mask, not the real value. Re-enter it with ` +
+          `masking off.`);
+      }
+      const bad = nonAscii(value);
+      if (bad) {
+        throw new Error(
+          `${name} has a non-ASCII character at index ${bad.index} ` +
+          `(code ${bad.code}). Expected plain ASCII — re-enter the value.`);
+      }
+    }
+    _client = createClient({ url, authToken: token });
+  } else {
+    _client = createClient({ url: `file:${path.join(process.cwd(), '..', 'data', 'tracker.db')}` });
+  }
   return _client;
 }
 
