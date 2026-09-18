@@ -117,26 +117,32 @@ def reconcile_episodes(con, mid, tmdb_eps, stats):
         stats['episodes_moved'] += len(moves)
         return [(mid, m) for m in moves]
 
-    # two-phase move: park in a slot nothing else can occupy, then land
-    for eid, _, _, _, _ in moves:
-        con.execute("UPDATE episode SET season = -1, number = -id WHERE id = ?", (eid,))
-    for eid, s, n, _, _ in moves:
-        con.execute("UPDATE episode SET season = ?, number = ? WHERE id = ?", (s, n, eid))
+    # Batched deliberately: against a remote database every execute() is an
+    # HTTP round trip. One statement per episode made a 9-second job take
+    # 8-12 minutes regardless of where it ran.
+    if moves:
+        # two-phase move: park in a slot nothing else can occupy, then land
+        con.executemany("UPDATE episode SET season = -1, number = -id WHERE id = ?",
+                        [(eid,) for eid, _, _, _, _ in moves])
+        con.executemany("UPDATE episode SET season = ?, number = ? WHERE id = ?",
+                        [(s, n, eid) for eid, s, n, _, _ in moves])
 
-    for e, eid in updates:
-        con.execute("""
+    if updates:
+        con.executemany("""
             UPDATE episode SET title = COALESCE(?, title), air_date = ?,
                    runtime = COALESCE(?, runtime), still_path = COALESCE(?, still_path),
                    tmdb_id = COALESCE(tmdb_id, ?)
             WHERE id = ?""",
-            (e['title'], e['air_date'], e['runtime'], e['still_path'], e['tmdb_id'], eid))
-    for e in inserts:
-        con.execute("""
+            [(e['title'], e['air_date'], e['runtime'], e['still_path'], e['tmdb_id'], eid)
+             for e, eid in updates])
+
+    if inserts:
+        con.executemany("""
             INSERT OR IGNORE INTO episode (media_id, season, number, title, tmdb_id,
                                            air_date, runtime, still_path)
             VALUES (?,?,?,?,?,?,?,?)""",
-            (mid, e['season'], e['number'], e['title'], e['tmdb_id'],
-             e['air_date'], e['runtime'], e['still_path']))
+            [(mid, e['season'], e['number'], e['title'], e['tmdb_id'],
+              e['air_date'], e['runtime'], e['still_path']) for e in inserts])
 
     stats['episodes_added'] += len(inserts)
     stats['episodes_moved'] += len(moves)
