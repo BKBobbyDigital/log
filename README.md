@@ -69,7 +69,21 @@ script read and write the same database. `scripts/dbconn.py` picks Turso when
 TURSO_DATABASE_URL is set and falls back to `data/tracker.db` otherwise, so
 `--local` still works offline against the old file.
 
-The local file is now a stale snapshot. Do not trust it.
+`data/tracker.db` is a local mirror, refreshed from Turso by
+`scripts/backup.py --refresh-local`. It is not authoritative — if it disagrees
+with the live site, it is out of date.
+
+## Backups
+
+Every play, rating and status lives in one hosted database. Ten years of
+history is not reconstructable, so take a copy:
+
+    .venv/bin/python scripts/backup.py                  # data/backups/log-<stamp>.db
+    .venv/bin/python scripts/backup.py --refresh-local  # also refresh the local mirror
+
+Each run verifies row counts table by table and queries a view in the copy, so
+a silently truncated backup fails loudly. Backups are gitignored — they
+contain your history.
 
 ## Nightly sync
 
