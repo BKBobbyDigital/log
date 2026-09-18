@@ -8,12 +8,14 @@ import StatusControl from '@/components/StatusControl';
 import RatingControl from '@/components/RatingControl';
 import EpisodeRow from '@/components/EpisodeRow';
 import MarkSeason from '@/components/MarkSeason';
+import { requireAuth } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ShowPage({
   params, searchParams,
 }: { params: Promise<{ id: string }>; searchParams: Promise<{ season?: string }> }) {
+  await requireAuth();
   const { id } = await params;
   const media = await getMedia(Number(id));
   if (!media || media.type !== 'show') notFound();

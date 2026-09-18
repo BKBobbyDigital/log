@@ -8,6 +8,7 @@ import { UpNextCard, CalendarCard, WatchlistCard } from '@/components/Cards';
 import StreakBar from '@/components/StreakBar';
 import Revived from '@/components/Revived';
 import FilterTabs from '@/components/FilterTabs';
+import { requireAuth } from '@/lib/auth';
 
 // reads the DB on every request; server actions revalidate this path
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,7 @@ export const dynamic = 'force-dynamic';
 export default async function Home({
   searchParams,
 }: { searchParams: Promise<{ filter?: string }> }) {
+  await requireAuth();
   const { filter: raw } = await searchParams;
   const filter: Filter = raw === 'shows' || raw === 'movies' ? raw : 'all';
   const showTV = filter !== 'movies';

@@ -59,3 +59,16 @@ export async function checkPassword(input: string): Promise<boolean> {
 }
 
 export const SESSION_COOKIE = COOKIE;
+
+/** Server-side gate for a page or action.
+ *
+ *  Defence in depth: proxy.ts already redirects unauthenticated requests, but
+ *  that depends on the host runtime honouring Next 16's proxy convention. If
+ *  it silently does not, every page would serve the full library to anyone
+ *  with the URL. This check does not depend on the host at all. */
+export async function requireAuth(): Promise<void> {
+  const { cookies } = await import('next/headers');
+  const { redirect } = await import('next/navigation');
+  const ok = await verifySession((await cookies()).get(COOKIE)?.value);
+  if (!ok) redirect('/login');
+}

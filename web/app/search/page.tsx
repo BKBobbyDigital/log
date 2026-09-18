@@ -2,12 +2,14 @@ import Link from 'next/link';
 import { searchTmdb, annotateLibrary } from '@/lib/tmdbApi';
 import { poster } from '@/lib/tmdb';
 import AddToLibrary from '@/components/AddToLibrary';
+import { requireAuth } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SearchPage({
   searchParams,
 }: { searchParams: Promise<{ q?: string }> }) {
+  await requireAuth();
   const { q } = await searchParams;
   const query = (q ?? '').trim();
   const hits = query ? await annotateLibrary(await searchTmdb(query)) : [];

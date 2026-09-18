@@ -5,10 +5,12 @@ import { poster } from '@/lib/tmdb';
 import StatusControl from '@/components/StatusControl';
 import RatingControl from '@/components/RatingControl';
 import { MarkMovie, RemovePlay } from '@/components/MovieActions';
+import { requireAuth } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export default async function MoviePage({ params }: { params: Promise<{ id: string }> }) {
+  await requireAuth();
   const { id } = await params;
   const media = await getMedia(Number(id));
   if (!media || media.type !== 'movie') notFound();
