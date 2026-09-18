@@ -15,12 +15,16 @@
   # SERVER function bundle, which is not web-accessible, so this is a false
   # positive for every one of these — they are read only in server code.
   #
+  # Every key is listed, not just the sensitive ones: the scanner checks EVERY
+  # env var's value against build output, so TURSO_DATABASE_URL and LOCAL_TZ
+  # fail the build just as readily once they exist.
+  #
   # What actually protects these is verified separately and still holds:
   #   - .env is gitignored; no value appears in the repo or its history
   #   - nothing uses a NEXT_PUBLIC_ prefix, so nothing is inlined for browsers
   #   - lib/client.ts, lib/db.ts and lib/tmdbApi.ts import "server-only", which
   #     fails the build if a client component ever pulls them in
-  SECRETS_SCAN_OMIT_KEYS = "APP_PASSWORD,AUTH_SECRET,TURSO_AUTH_TOKEN,TMDB_API_KEY"
+  SECRETS_SCAN_OMIT_KEYS = "APP_PASSWORD,AUTH_SECRET,TURSO_AUTH_TOKEN,TMDB_API_KEY,TURSO_DATABASE_URL,LOCAL_TZ"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
