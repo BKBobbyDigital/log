@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import RefreshOnFocus from '@/components/RefreshOnFocus';
 
 export const metadata: Metadata = {
   title: 'LOG',
@@ -21,7 +22,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="mx-auto max-w-2xl pb-16">{children}</body>
+      <body className="mx-auto max-w-2xl pb-16">
+        <RefreshOnFocus />
+        {children}
+      </body>
     </html>
   );
 }
