@@ -1,20 +1,9 @@
-import Database from 'better-sqlite3';
-import path from 'node:path';
+import 'server-only';
+import { q, one, run, batch } from './client';
 import { conf } from './config';
-
-const DB_PATH = path.join(process.cwd(), '..', 'data', 'tracker.db');
 
 // JS and the Python scripts must agree on where a day starts — see README.
 export const LOCAL_TZ = conf('LOCAL_TZ', 'UTC');
-
-let _db: Database.Database | null = null;
-function db() {
-  if (!_db) {
-    _db = new Database(DB_PATH);
-    _db.pragma('journal_mode = WAL');
-  }
-  return _db;
-}
 
 export function localDay(d = new Date()): string {
   // en-CA gives YYYY-MM-DD
@@ -57,59 +46,63 @@ export type BetweenSeasonsItem = {
   last_watched_at: string | null;
 };
 
-export function getUpNext(): UpNextItem[] {
-  return db().prepare(`
-    SELECT * FROM up_next
-    ORDER BY never_started ASC, last_watched_at DESC
-  `).all() as UpNextItem[];
+export type MediaDetail = {
+  id: number; type: MediaType; title: string; year: number | null;
+  overview: string | null; poster_path: string | null; backdrop_path: string | null;
+  runtime: number | null; tmdb_rating: number | null; show_status: string | null;
+  status: string | null; status_set_at: string | null; added_at: string | null;
+  tmdb_id: number | null; imdb_id: string | null;
+};
+
+export type SeasonRow = { season: number; episodes: number; aired: number; watched: number };
+
+export type EpisodeRow = {
+  id: number; season: number; number: number; title: string | null;
+  air_date: string | null; runtime: number | null; still_path: string | null;
+  plays: number; rating: number | null;
+};
+
+// ─── home rails ──────────────────────────────────────────────────────────────
+
+export const getUpNext = () =>
+  q<UpNextItem>(`SELECT * FROM up_next ORDER BY never_started ASC, last_watched_at DESC`);
+
+export const getCalendar = (limit = 30) =>
+  q<CalendarItem>(`SELECT * FROM calendar_upcoming ORDER BY air_date, show_title LIMIT ?`, [limit]);
+
+export function getWatchlist(filter: Filter = 'all', limit = 40) {
+  const args: (string | number)[] = [];
+  let where = '';
+  if (filter !== 'all') { where = 'WHERE type = ?'; args.push(filter === 'shows' ? 'show' : 'movie'); }
+  args.push(limit);
+  return q<WatchlistItem>(
+    `SELECT * FROM watchlist_rail ${where} ORDER BY status_set_at DESC LIMIT ?`, args);
 }
 
-export function getCalendar(limit = 30): CalendarItem[] {
-  return db().prepare(`
-    SELECT * FROM calendar_upcoming ORDER BY air_date, show_title LIMIT ?
-  `).all(limit) as CalendarItem[];
-}
-
-export function getWatchlist(filter: Filter = 'all', limit = 40): WatchlistItem[] {
-  const where = filter === 'all' ? '' : `AND type = '${filter === 'shows' ? 'show' : 'movie'}'`;
-  return db().prepare(`
-    SELECT * FROM watchlist_rail WHERE 1=1 ${where}
-    ORDER BY status_set_at DESC LIMIT ?
-  `).all(limit) as WatchlistItem[];
-}
-
-/** Finished shows that have since aired new episodes. The counterpart to
- *  auto-finish — without it, a revived show would stay buried. */
-export function getRevived(): RevivedItem[] {
-  return db().prepare(`
-    SELECT * FROM revived ORDER BY first_new_air_date DESC
-  `).all() as RevivedItem[];
-}
+/** Finished shows that have since aired new episodes — the counterpart to
+ *  auto-finish. Without it a revived show would stay buried. */
+export const getRevived = () =>
+  q<RevivedItem>(`SELECT * FROM revived ORDER BY first_new_air_date DESC`);
 
 /** status=watching, caught up, not over. Label only — status is untouched. */
-export function getBetweenSeasons(): BetweenSeasonsItem[] {
-  return db().prepare(`
-    SELECT * FROM between_seasons
-    ORDER BY (returns_on IS NULL), returns_on, last_watched_at DESC
-  `).all() as BetweenSeasonsItem[];
-}
+export const getBetweenSeasons = () =>
+  q<BetweenSeasonsItem>(
+    `SELECT * FROM between_seasons ORDER BY (returns_on IS NULL), returns_on, last_watched_at DESC`);
 
-export function getStreak(): { length: number; started: string; ended: string } | null {
+export async function getStreak() {
   const today = localDay();
   const yesterday = localDay(new Date(Date.now() - 86400_000));
-  return db().prepare(`
-    SELECT length, started, ended FROM streaks
-    WHERE ended IN (?, ?) ORDER BY ended DESC LIMIT 1
-  `).get(today, yesterday) as { length: number; started: string; ended: string } | undefined ?? null;
+  return one<{ length: number; started: string; ended: string }>(
+    `SELECT length, started, ended FROM streaks WHERE ended IN (?, ?) ORDER BY ended DESC LIMIT 1`,
+    [today, yesterday]);
 }
 
-/** Last 7 local days, for the streak sparkline. */
-export function getRecentDays(n = 7): { day: string; plays: number }[] {
-  const rows = db().prepare(`
-    SELECT local_day AS day, COUNT(*) AS plays FROM watch
-    WHERE is_backfill = 0 AND local_day >= date(?, '-' || ? || ' day')
-    GROUP BY local_day
-  `).all(localDay(), n) as { day: string; plays: number }[];
+/** Last n local days, for the streak sparkline. */
+export async function getRecentDays(n = 7) {
+  const rows = await q<{ day: string; plays: number }>(
+    `SELECT local_day AS day, COUNT(*) AS plays FROM watch
+     WHERE is_backfill = 0 AND local_day >= date(?, '-' || ? || ' day')
+     GROUP BY local_day`, [localDay(), n]);
   const by = new Map(rows.map(r => [r.day, r.plays]));
   const out: { day: string; plays: number }[] = [];
   for (let i = n - 1; i >= 0; i--) {
@@ -119,114 +112,44 @@ export function getRecentDays(n = 7): { day: string; plays: number }[] {
   return out;
 }
 
-export function getStats() {
-  const one = (sql: string, ...a: unknown[]) =>
-    (db().prepare(sql).get(...a) as Record<string, number>);
-  return {
-    ...one(`SELECT
+export async function getStats() {
+  return (await one<{ episodes: number; movies: number; watching: number; watchlist: number }>(`
+    SELECT
       (SELECT COUNT(*) FROM watch WHERE episode_id IS NOT NULL) AS episodes,
       (SELECT COUNT(*) FROM watch WHERE episode_id IS NULL)     AS movies,
       (SELECT COUNT(*) FROM media WHERE status='watching')      AS watching,
-      (SELECT COUNT(*) FROM media WHERE status='watchlist')     AS watchlist`),
-  };
+      (SELECT COUNT(*) FROM media WHERE status='watchlist')     AS watchlist`))!;
 }
-
-/** Plays of the same thing closer together than this are treated as one.
- *  Rewatches append silently by design, which means an accidental double-log
- *  is invisible — a double-tap, or a server action replayed by a reload. No
- *  one rewatches an episode 5 minutes after finishing it. */
-const DEDUPE_WINDOW_MINUTES = 5;
-
-function isDuplicate(mediaId: number, episodeId: number | null, watchedAt: string): boolean {
-  const row = db().prepare(`
-    SELECT 1 FROM watch
-    WHERE media_id = ? AND episode_id IS ?
-      AND ABS(julianday(?) - julianday(watched_at)) * 24 * 60 < ?
-    LIMIT 1
-  `).get(mediaId, episodeId, watchedAt, DEDUPE_WINDOW_MINUTES);
-  return row !== undefined;
-}
-
-/** Append a play. The log is append-only; nothing here touches media.status.
- *  Returns false when the play was suppressed as a duplicate. */
-export function markWatched(mediaId: number, episodeId: number | null): boolean {
-  const now = new Date();
-  const watchedAt = now.toISOString().replace(/\.\d{3}Z$/, '.000Z');
-  if (isDuplicate(mediaId, episodeId, watchedAt)) return false;
-  db().prepare(`
-    INSERT INTO watch (media_id, episode_id, watched_at, is_backfill, local_day)
-    VALUES (?, ?, ?, 0, ?)
-  `).run(mediaId, episodeId, watchedAt, localDay(now));
-  return true;
-}
-
-/** "Not now" — records WHICH status was dismissed, so the prompt comes back
- *  by itself if the show later changes (Returning Series -> Canceled). */
-export function dismissDecision(mediaId: number) {
-  db().prepare(`
-    UPDATE media SET decision_dismissed_at = datetime('now'),
-                     decision_dismissed_status = show_status
-    WHERE id = ?`).run(mediaId);
-}
-
-export function setStatus(mediaId: number, status: string | null) {
-  db().prepare(`UPDATE media SET status = ?, status_set_at = datetime('now') WHERE id = ?`)
-    .run(status, mediaId);
-}
-
 
 // ─── detail pages ────────────────────────────────────────────────────────────
 
-export type MediaDetail = {
-  id: number; type: MediaType; title: string; year: number | null;
-  overview: string | null; poster_path: string | null; backdrop_path: string | null;
-  runtime: number | null; tmdb_rating: number | null; show_status: string | null;
-  status: string | null; status_set_at: string | null; added_at: string | null;
-  tmdb_id: number | null; imdb_id: string | null;
-};
-
-export type SeasonRow = {
-  season: number; episodes: number; aired: number; watched: number;
-};
-
-export type EpisodeRow = {
-  id: number; season: number; number: number; title: string | null;
-  air_date: string | null; runtime: number | null; still_path: string | null;
-  plays: number; rating: number | null;
-};
-
-export function getMedia(id: number): MediaDetail | null {
-  return db().prepare(`
+export const getMedia = (id: number) =>
+  one<MediaDetail>(`
     SELECT id, type, title, year, overview, poster_path, backdrop_path, runtime,
            tmdb_rating, show_status, status, status_set_at, added_at, tmdb_id, imdb_id
-    FROM media WHERE id = ?
-  `).get(id) as MediaDetail | undefined ?? null;
-}
+    FROM media WHERE id = ?`, [id]);
 
-export function getSeasons(mediaId: number): SeasonRow[] {
-  return db().prepare(`
+export const getSeasons = (mediaId: number) =>
+  q<SeasonRow>(`
     SELECT e.season,
            COUNT(*) AS episodes,
            SUM(CASE WHEN e.air_date IS NOT NULL AND e.air_date <= date('now') THEN 1 ELSE 0 END) AS aired,
            SUM(CASE WHEN EXISTS (SELECT 1 FROM watch w WHERE w.episode_id = e.id) THEN 1 ELSE 0 END) AS watched
     FROM episode e WHERE e.media_id = ?
-    GROUP BY e.season ORDER BY e.season
-  `).all(mediaId) as SeasonRow[];
-}
+    GROUP BY e.season ORDER BY e.season`, [mediaId]);
 
-export function getEpisodes(mediaId: number, season: number): EpisodeRow[] {
-  return db().prepare(`
+export const getEpisodes = (mediaId: number, season: number) =>
+  q<EpisodeRow>(`
     SELECT e.id, e.season, e.number, e.title, e.air_date, e.runtime, e.still_path,
            (SELECT COUNT(*) FROM watch w WHERE w.episode_id = e.id) AS plays,
            (SELECT r.rating FROM rating r WHERE r.episode_id = e.id) AS rating
     FROM episode e WHERE e.media_id = ? AND e.season = ?
-    ORDER BY e.number
-  `).all(mediaId, season) as EpisodeRow[];
-}
+    ORDER BY e.number`, [mediaId, season]);
 
-/** Aggregate progress for a show: what has aired, what you've logged. */
-export function getShowProgress(mediaId: number) {
-  return db().prepare(`
+export async function getShowProgress(mediaId: number) {
+  return (await one<{
+    aired: number; watched: number; plays: number; gaps: number; last_watched_at: string | null;
+  }>(`
     SELECT
       (SELECT COUNT(*) FROM episode e WHERE e.media_id = m.id AND e.season > 0
          AND e.air_date IS NOT NULL AND e.air_date <= date('now')) AS aired,
@@ -235,101 +158,123 @@ export function getShowProgress(mediaId: number) {
       (SELECT COUNT(*) FROM watch w WHERE w.media_id = m.id) AS plays,
       (SELECT COUNT(*) FROM episode_gaps g WHERE g.media_id = m.id) AS gaps,
       (SELECT MAX(watched_at) FROM watch w WHERE w.media_id = m.id) AS last_watched_at
-    FROM media m WHERE m.id = ?
-  `).get(mediaId) as {
-    aired: number; watched: number; plays: number; gaps: number; last_watched_at: string | null;
-  };
+    FROM media m WHERE m.id = ?`, [mediaId]))!;
 }
 
-export function getPlays(mediaId: number, limit = 50) {
-  return db().prepare(`
+export const getPlays = (mediaId: number, limit = 50) =>
+  q<{
+    id: number; watched_at: string; local_day: string | null; is_backfill: number;
+    season: number | null; number: number | null; episode_title: string | null;
+  }>(`
     SELECT w.id, w.watched_at, w.local_day, w.is_backfill,
            e.season, e.number, e.title AS episode_title
     FROM watch w LEFT JOIN episode e ON e.id = w.episode_id
-    WHERE w.media_id = ? ORDER BY w.watched_at DESC LIMIT ?
-  `).all(mediaId, limit) as {
-    id: number; watched_at: string; local_day: string | null; is_backfill: number;
-    season: number | null; number: number | null; episode_title: string | null;
-  }[];
-}
+    WHERE w.media_id = ? ORDER BY w.watched_at DESC LIMIT ?`, [mediaId, limit]);
 
-export function getRating(mediaId: number): number | null {
-  const r = db().prepare(
-    `SELECT rating FROM rating WHERE media_id = ? AND season IS NULL AND episode_id IS NULL`
-  ).get(mediaId) as { rating: number } | undefined;
+export async function getRating(mediaId: number): Promise<number | null> {
+  const r = await one<{ rating: number }>(
+    `SELECT rating FROM rating WHERE media_id = ? AND season IS NULL AND episode_id IS NULL`,
+    [mediaId]);
   return r?.rating ?? null;
 }
 
 // ─── mutations ───────────────────────────────────────────────────────────────
 
+/** Plays of the same thing closer together than this are treated as one.
+ *  Rewatches append silently by design, which means an accidental double-log
+ *  is invisible — a double-tap, or a server action replayed by a reload. No
+ *  one rewatches an episode 5 minutes after finishing it. */
+const DEDUPE_WINDOW_MINUTES = 5;
+
+async function isDuplicate(
+  mediaId: number, episodeId: number | null, watchedAt: string,
+): Promise<boolean> {
+  const row = await one(`
+    SELECT 1 AS x FROM watch
+    WHERE media_id = ? AND episode_id IS ?
+      AND ABS(julianday(?) - julianday(watched_at)) * 24 * 60 < ?
+    LIMIT 1`, [mediaId, episodeId, watchedAt, DEDUPE_WINDOW_MINUTES]);
+  return row !== null;
+}
+
+/** Append a play. The log is append-only; nothing here touches media.status.
+ *  Returns false when the play was suppressed as a duplicate. */
+export async function markWatched(mediaId: number, episodeId: number | null): Promise<boolean> {
+  const now = new Date();
+  const watchedAt = now.toISOString().replace(/\.\d{3}Z$/, '.000Z');
+  if (await isDuplicate(mediaId, episodeId, watchedAt)) return false;
+  await run(`INSERT INTO watch (media_id, episode_id, watched_at, is_backfill, local_day)
+             VALUES (?, ?, ?, 0, ?)`, [mediaId, episodeId, watchedAt, localDay(now)]);
+  return true;
+}
+
 /** Backdate: watched_at is built from a local day, kept consistent with local_day. */
-export function markWatchedOn(
+export async function markWatchedOn(
   mediaId: number, episodeId: number | null, day: string,
-): boolean {
+): Promise<boolean> {
   const now = new Date();
   const time = day === localDay(now)
     ? now.toISOString().slice(11, 19)      // today -> actual time
     : '20:00:00';                          // past day -> a plausible evening
   const watchedAt = `${day}T${time}.000Z`;
-  if (isDuplicate(mediaId, episodeId, watchedAt)) return false;
-  db().prepare(`
-    INSERT INTO watch (media_id, episode_id, watched_at, is_backfill, local_day)
-    VALUES (?, ?, ?, 0, ?)
-  `).run(mediaId, episodeId, watchedAt, day);
+  if (await isDuplicate(mediaId, episodeId, watchedAt)) return false;
+  await run(`INSERT INTO watch (media_id, episode_id, watched_at, is_backfill, local_day)
+             VALUES (?, ?, ?, 0, ?)`, [mediaId, episodeId, watchedAt, day]);
   return true;
 }
 
 /** One play per unwatched episode in the season. Aired episodes only. */
-export function markSeasonWatched(mediaId: number, season: number): number {
-  const rows = db().prepare(`
+export async function markSeasonWatched(mediaId: number, season: number): Promise<number> {
+  const rows = await q<{ id: number }>(`
     SELECT e.id FROM episode e
     WHERE e.media_id = ? AND e.season = ?
       AND e.air_date IS NOT NULL AND e.air_date <= date('now')
-      AND NOT EXISTS (SELECT 1 FROM watch w WHERE w.episode_id = e.id)
-  `).all(mediaId, season) as { id: number }[];
+      AND NOT EXISTS (SELECT 1 FROM watch w WHERE w.episode_id = e.id)`, [mediaId, season]);
   const day = localDay();
-  const stmt = db().prepare(`
-    INSERT INTO watch (media_id, episode_id, watched_at, is_backfill, local_day)
-    VALUES (?, ?, ?, 0, ?)`);
-  const run = db().transaction((ids: { id: number }[]) => {
-    for (const r of ids) stmt.run(mediaId, r.id, `${day}T20:00:00.000Z`, day);
-  });
-  run(rows);
+  await batch(rows.map(r => ({
+    sql: `INSERT INTO watch (media_id, episode_id, watched_at, is_backfill, local_day)
+          VALUES (?, ?, ?, 0, ?)`,
+    args: [mediaId, r.id, `${day}T20:00:00.000Z`, day],
+  })));
   return rows.length;
 }
 
 /** The one exception to append-only: undoing a mis-tap. */
-export function unmarkWatch(watchId: number) {
-  db().prepare(`DELETE FROM watch WHERE id = ?`).run(watchId);
-}
+export const unmarkWatch = (watchId: number) =>
+  run(`DELETE FROM watch WHERE id = ?`, [watchId]);
 
 /** Remove the most recent play of an episode (or movie). */
-export function unmarkLatest(mediaId: number, episodeId: number | null) {
-  db().prepare(`
-    DELETE FROM watch WHERE id = (
-      SELECT id FROM watch
-      WHERE media_id = ? AND episode_id IS ?
-      ORDER BY watched_at DESC LIMIT 1)
-  `).run(mediaId, episodeId);
-}
+export const unmarkLatest = (mediaId: number, episodeId: number | null) =>
+  run(`DELETE FROM watch WHERE id = (
+         SELECT id FROM watch WHERE media_id = ? AND episode_id IS ?
+         ORDER BY watched_at DESC LIMIT 1)`, [mediaId, episodeId]);
 
-export function setRating(mediaId: number, rating: number | null) {
+export const setStatus = (mediaId: number, status: string | null) =>
+  run(`UPDATE media SET status = ?, status_set_at = datetime('now') WHERE id = ?`,
+      [status, mediaId]);
+
+export async function setRating(mediaId: number, rating: number | null) {
   if (rating === null) {
-    db().prepare(
-      `DELETE FROM rating WHERE media_id = ? AND season IS NULL AND episode_id IS NULL`
-    ).run(mediaId);
+    await run(`DELETE FROM rating WHERE media_id = ? AND season IS NULL AND episode_id IS NULL`,
+              [mediaId]);
     return;
   }
-  db().prepare(`
+  await run(`
     INSERT INTO rating (media_id, season, episode_id, rating, rated_at)
     VALUES (?, NULL, NULL, ?, datetime('now'))
     ON CONFLICT (media_id, season, episode_id) DO UPDATE
-      SET rating = excluded.rating, rated_at = excluded.rated_at
-  `).run(mediaId, rating);
+      SET rating = excluded.rating, rated_at = excluded.rated_at`, [mediaId, rating]);
 }
 
-export function findByTmdb(type: MediaType, tmdbId: number): number | null {
-  const r = db().prepare(`SELECT id FROM media WHERE type = ? AND tmdb_id = ?`)
-    .get(type, tmdbId) as { id: number } | undefined;
+/** "Not now" — records WHICH status was dismissed, so the prompt comes back
+ *  by itself if the show later changes (Returning Series -> Canceled). */
+export const dismissDecision = (mediaId: number) =>
+  run(`UPDATE media SET decision_dismissed_at = datetime('now'),
+                        decision_dismissed_status = show_status
+       WHERE id = ?`, [mediaId]);
+
+export async function findByTmdb(type: MediaType, tmdbId: number): Promise<number | null> {
+  const r = await one<{ id: number }>(
+    `SELECT id FROM media WHERE type = ? AND tmdb_id = ?`, [type, tmdbId]);
   return r?.id ?? null;
 }

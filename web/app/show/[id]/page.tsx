@@ -15,10 +15,10 @@ export default async function ShowPage({
   params, searchParams,
 }: { params: Promise<{ id: string }>; searchParams: Promise<{ season?: string }> }) {
   const { id } = await params;
-  const media = getMedia(Number(id));
+  const media = await getMedia(Number(id));
   if (!media || media.type !== 'show') notFound();
 
-  const seasons = getSeasons(media.id).filter(s => s.episodes > 0);
+  const seasons = (await getSeasons(media.id)).filter(s => s.episodes > 0);
   const { season: rawSeason } = await searchParams;
   // default to the earliest season with something unwatched, else the last
   const defaultSeason =
@@ -26,9 +26,9 @@ export default async function ShowPage({
     seasons[seasons.length - 1]?.season ?? 1;
   const season = rawSeason !== undefined ? Number(rawSeason) : defaultSeason;
 
-  const episodes = getEpisodes(media.id, season);
-  const progress = getShowProgress(media.id);
-  const rating = getRating(media.id);
+  const episodes = await getEpisodes(media.id, season);
+  const progress = await getShowProgress(media.id);
+  const rating = await getRating(media.id);
   const pct = progress.aired ? Math.round((progress.watched / progress.aired) * 100) : 0;
   const seasonPending = episodes.filter(
     e => e.plays === 0 && e.air_date !== null && e.air_date <= new Date().toISOString().slice(0, 10),

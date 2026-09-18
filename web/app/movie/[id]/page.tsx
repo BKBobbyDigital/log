@@ -10,11 +10,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function MoviePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const media = getMedia(Number(id));
+  const media = await getMedia(Number(id));
   if (!media || media.type !== 'movie') notFound();
 
-  const plays = getPlays(media.id);
-  const rating = getRating(media.id);
+  const plays = await getPlays(media.id);
+  const rating = await getRating(media.id);
 
   return (
     <main className="pb-20">

@@ -19,13 +19,13 @@ export default async function Home({
   const filter: Filter = raw === 'shows' || raw === 'movies' ? raw : 'all';
   const showTV = filter !== 'movies';
 
-  const upNext = showTV ? getUpNext() : [];
-  const calendar = showTV ? getCalendar() : [];
-  const watchlist = getWatchlist(filter);
-  const revived = showTV ? getRevived() : [];
-  const streak = getStreak();
-  const days = getRecentDays();
-  const stats = getStats();
+  const upNext = showTV ? await getUpNext() : [];
+  const calendar = showTV ? await getCalendar() : [];
+  const watchlist = await getWatchlist(filter);
+  const revived = showTV ? await getRevived() : [];
+  const streak = await getStreak();
+  const days = await getRecentDays();
+  const stats = await getStats();
 
   return (
     <main>

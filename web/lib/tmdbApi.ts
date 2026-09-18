@@ -1,7 +1,6 @@
 import 'server-only';
-import path from 'node:path';
-import Database from 'better-sqlite3';
 import { conf } from './config';
+import { q, one, run, db } from './client';
 
 const API = 'https://api.themoviedb.org/3';
 const KEY = conf('TMDB_API_KEY');
@@ -68,94 +67,82 @@ type SeasonDetail = {
   }[];
 };
 
-function openDb() {
-  const db = new Database(path.join(process.cwd(), '..', 'data', 'tracker.db'));
-  db.pragma('journal_mode = WAL');
-  return db;
-}
-
 /** Insert a TMDB title into the library at the given status, with full
  *  metadata — and, for shows, the whole episode list so Up Next and the
  *  calendar work immediately rather than after the next nightly run. */
 export async function addToLibrary(
   tmdbId: number, type: 'movie' | 'show', status: string,
 ): Promise<number | null> {
-  const db = openDb();
-  try {
-    const existing = db.prepare(`SELECT id FROM media WHERE type = ? AND tmdb_id = ?`)
-      .get(type, tmdbId) as { id: number } | undefined;
-    if (existing) {
-      db.prepare(`UPDATE media SET status = ?, status_set_at = datetime('now') WHERE id = ?`)
-        .run(status, existing.id);
-      return existing.id;
-    }
+  const existing = await one<{ id: number }>(
+    `SELECT id FROM media WHERE type = ? AND tmdb_id = ?`, [type, tmdbId]);
+  if (existing) {
+    await run(`UPDATE media SET status = ?, status_set_at = datetime('now') WHERE id = ?`,
+              [status, existing.id]);
+    return existing.id;
+  }
 
-    if (type === 'movie') {
-      const d = await get<MovieDetail>(`movie/${tmdbId}`);
-      if (!d) return null;
-      const r = db.prepare(`
+  if (type === 'movie') {
+    const d = await get<MovieDetail>(`movie/${tmdbId}`);
+    if (!d) return null;
+    const r = await db().execute({ sql: `
         INSERT INTO media (type, tmdb_id, imdb_id, trakt_id, title, year, status,
                            status_set_at, added_at, poster_path, backdrop_path,
                            overview, runtime, tmdb_rating, enriched_at)
         VALUES ('movie', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'),
-                ?, ?, ?, ?, ?, datetime('now'))
-      `).run(tmdbId, d.imdb_id, -tmdbId, d.title,
+                ?, ?, ?, ?, ?, datetime('now'))`,
+      args: [tmdbId, d.imdb_id, -tmdbId, d.title,
              d.release_date ? Number(d.release_date.slice(0, 4)) : null, status,
-             d.poster_path, d.backdrop_path, d.overview, d.runtime, d.vote_average);
-      return Number(r.lastInsertRowid);
-    }
+             d.poster_path, d.backdrop_path, d.overview, d.runtime, d.vote_average] });
+    return Number(r.lastInsertRowid);
+  }
 
-    const d = await get<ShowDetail>(`tv/${tmdbId}`, { append_to_response: 'external_ids' });
-    if (!d) return null;
-    const rt = d.episode_run_time?.[0] ?? null;
-    const r = db.prepare(`
+  const d = await get<ShowDetail>(`tv/${tmdbId}`, { append_to_response: 'external_ids' });
+  if (!d) return null;
+  const rt = d.episode_run_time?.[0] ?? null;
+  const r = await db().execute({ sql: `
       INSERT INTO media (type, tmdb_id, imdb_id, tvdb_id, trakt_id, title, year, status,
                          status_set_at, added_at, poster_path, backdrop_path, overview,
                          runtime, tmdb_rating, show_status, aired_episodes, enriched_at)
       VALUES ('show', ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'),
-              ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run(tmdbId, d.external_ids?.imdb_id ?? null, d.external_ids?.tvdb_id ?? null,
+              ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    args: [tmdbId, d.external_ids?.imdb_id ?? null, d.external_ids?.tvdb_id ?? null,
            -tmdbId, d.name, d.first_air_date ? Number(d.first_air_date.slice(0, 4)) : null,
            status, d.poster_path, d.backdrop_path, d.overview, rt, d.vote_average,
-           d.status, d.number_of_episodes);
-    const mediaId = Number(r.lastInsertRowid);
+           d.status, d.number_of_episodes] });
+  const mediaId = Number(r.lastInsertRowid);
 
-    // episode list, 20 seasons per request
-    const seasons = d.seasons.map(s => s.season_number);
-    const ins = db.prepare(`
-      INSERT OR IGNORE INTO episode (media_id, season, number, title, tmdb_id,
-                                     air_date, runtime, still_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-    for (let i = 0; i < seasons.length; i += 20) {
-      const chunk = seasons.slice(i, i + 20);
-      const det = await get<Record<string, SeasonDetail>>(`tv/${tmdbId}`, {
-        append_to_response: chunk.map(n => `season/${n}`).join(','),
-      });
-      if (!det) continue;
-      for (const n of chunk) {
-        for (const e of det[`season/${n}`]?.episodes ?? []) {
-          ins.run(mediaId, e.season_number, e.episode_number, e.name, e.id,
-                  e.air_date || null, e.runtime, e.still_path);
-        }
+  // episode list, 20 seasons per request
+  const seasons = d.seasons.map(s => s.season_number);
+  const pending: { sql: string; args: (string | number | null)[] }[] = [];
+  for (let i = 0; i < seasons.length; i += 20) {
+    const chunk = seasons.slice(i, i + 20);
+    const det = await get<Record<string, SeasonDetail>>(`tv/${tmdbId}`, {
+      append_to_response: chunk.map(n => `season/${n}`).join(','),
+    });
+    if (!det) continue;
+    for (const n of chunk) {
+      for (const e of det[`season/${n}`]?.episodes ?? []) {
+        pending.push({
+          sql: `INSERT OR IGNORE INTO episode (media_id, season, number, title, tmdb_id,
+                                               air_date, runtime, still_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [mediaId, e.season_number, e.episode_number, e.name, e.id,
+                 e.air_date || null, e.runtime, e.still_path],
+        });
       }
     }
-    return mediaId;
-  } finally {
-    db.close();
   }
+  if (pending.length) await db().batch(pending, 'write');
+  return mediaId;
 }
 
-/** Flag search hits that are already in the library. */
-export function annotateLibrary(hits: SearchHit[]): SearchHit[] {
+/** Flag search hits that are already in the library — one query, not N. */
+export async function annotateLibrary(hits: SearchHit[]): Promise<SearchHit[]> {
   if (hits.length === 0) return hits;
-  const db = openDb();
-  try {
-    const stmt = db.prepare(`SELECT id, status FROM media WHERE type = ? AND tmdb_id = ?`);
-    return hits.map(h => {
-      const row = stmt.get(h.type, h.tmdb_id) as { id: number } | undefined;
-      return { ...h, in_library: row?.id ?? null };
-    });
-  } finally {
-    db.close();
-  }
+  const ids = [...new Set(hits.map(h => h.tmdb_id))];
+  const rows = await q<{ id: number; type: string; tmdb_id: number }>(
+    `SELECT id, type, tmdb_id FROM media WHERE tmdb_id IN (${ids.map(() => '?').join(',')})`,
+    ids);
+  const found = new Map(rows.map(r => [`${r.type}-${r.tmdb_id}`, r.id]));
+  return hits.map(h => ({ ...h, in_library: found.get(`${h.type}-${h.tmdb_id}`) ?? null }));
 }

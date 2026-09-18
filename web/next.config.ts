@@ -1,8 +1,8 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  // better-sqlite3 is native; keep it out of the bundler
-  serverExternalPackages: ['better-sqlite3'],
+  // libSQL talks HTTP to Turso — no native module in the deployed app.
+  // better-sqlite3 is a dev dependency now, used only by the migration script.
 };
 
 export default nextConfig;

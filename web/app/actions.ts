@@ -11,28 +11,28 @@ import { addToLibrary } from '@/lib/tmdbApi';
 const refresh = () => revalidatePath('/', 'layout');
 
 export async function markWatchedAction(mediaId: number, episodeId: number | null) {
-  markWatched(mediaId, episodeId); refresh();
+  await markWatched(mediaId, episodeId); refresh();
 }
 export async function markWatchedOnAction(mediaId: number, episodeId: number | null, day: string) {
-  markWatchedOn(mediaId, episodeId, day); refresh();
+  await markWatchedOn(mediaId, episodeId, day); refresh();
 }
 export async function markSeasonWatchedAction(mediaId: number, season: number) {
-  const n = markSeasonWatched(mediaId, season); refresh(); return n;
+  const n = await markSeasonWatched(mediaId, season); refresh(); return n;
 }
 export async function unmarkLatestAction(mediaId: number, episodeId: number | null) {
-  unmarkLatest(mediaId, episodeId); refresh();
+  await unmarkLatest(mediaId, episodeId); refresh();
 }
 export async function unmarkWatchAction(watchId: number) {
-  unmarkWatch(watchId); refresh();
+  await unmarkWatch(watchId); refresh();
 }
 export async function setStatusAction(mediaId: number, status: string) {
-  setStatus(mediaId, status); refresh();
+  await setStatus(mediaId, status); refresh();
 }
 export async function setRatingAction(mediaId: number, rating: number | null) {
-  setRating(mediaId, rating); refresh();
+  await setRating(mediaId, rating); refresh();
 }
 export async function dismissDecisionAction(mediaId: number) {
-  dismissDecision(mediaId); refresh();
+  await dismissDecision(mediaId); refresh();
 }
 export async function addToLibraryAction(tmdbId: number, type: 'movie' | 'show', status: string) {
   const id = await addToLibrary(tmdbId, type, status); refresh(); return id;

@@ -10,7 +10,7 @@ export default async function SearchPage({
 }: { searchParams: Promise<{ q?: string }> }) {
   const { q } = await searchParams;
   const query = (q ?? '').trim();
-  const hits = query ? annotateLibrary(await searchTmdb(query)) : [];
+  const hits = query ? await annotateLibrary(await searchTmdb(query)) : [];
 
   return (
     <main className="pb-20">

@@ -1,0 +1,8 @@
+# The Next app lives in web/, so Netlify builds from there.
+# @netlify/plugin-nextjs is auto-installed by Netlify for Next projects.
+[build]
+  base    = "web"
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "22"
