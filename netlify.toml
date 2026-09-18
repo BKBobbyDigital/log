@@ -1,8 +1,14 @@
 # The Next app lives in web/, so Netlify builds from there.
-# @netlify/plugin-nextjs is auto-installed by Netlify for Next projects.
+# publish is relative to base. The Next runtime is declared explicitly rather
+# than relying on auto-detection, which does not always fire when the app is
+# in a subdirectory.
 [build]
   base    = "web"
   command = "npm run build"
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "22"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
