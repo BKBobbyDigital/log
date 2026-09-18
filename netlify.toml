@@ -4,7 +4,7 @@
 # in a subdirectory.
 [build]
   base    = "web"
-  command = "npm run build"
+  command = "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) npm run build"
   publish = ".next"
 
 [build.environment]

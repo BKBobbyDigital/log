@@ -26,5 +26,18 @@ export async function GET() {
     database = `error: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200);
   }
 
-  return NextResponse.json({ ok: Object.values(env).every(Boolean) && database === 'ok', env, database });
+  // Which deploy is actually serving? Without this it is impossible to tell a
+  // failed build from a successful one that predates an env var change --
+  // both simply look like "the old values are still there".
+  const deploy = {
+    commit: process.env.COMMIT_REF?.slice(0, 7) ?? 'unknown',
+    branch: process.env.BRANCH ?? 'unknown',
+    context: process.env.CONTEXT ?? 'local',
+    built_at: process.env.BUILD_TIME ?? 'unknown',
+  };
+
+  return NextResponse.json({
+    ok: Object.values(env).every(Boolean) && database === 'ok',
+    deploy, env, database,
+  });
 }
