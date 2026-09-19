@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { conf, looksMasked, nonAscii } from '@/lib/config';
 import { q } from '@/lib/client';
+import { UP_NEXT, CALENDAR, BETWEEN_SEASONS, REVIVED, EPISODE_GAPS } from '@/lib/sql';
+import { localDay } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,10 +33,31 @@ export async function GET() {
         : `ok (${v.length} chars)`;
   }
 
+  // Exercise the REAL queries, not SELECT 1. A connectivity-only check
+  // reported "ok" while the app's views were missing from the database --
+  // it cannot fail in any way that matters.
   let database = 'not attempted';
+  const views: Record<string, string> = {};
+  const today = localDay();
   try {
     await q('SELECT 1 AS ok');
     database = 'ok';
+    const probes: [string, string][] = [
+      ['up_next', UP_NEXT], ['calendar', CALENDAR], ['between_seasons', BETWEEN_SEASONS],
+      ['revived', REVIVED], ['episode_gaps', EPISODE_GAPS],
+      ['watchlist', `SELECT id FROM media WHERE status = 'watchlist'`],
+      ['history', `SELECT id FROM watch WHERE is_backfill = 0`],
+    ];
+    for (const [name, sql] of probes) {
+      try {
+        const rows = await q<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM (${sql})`, sql.includes(':today') ? { today } : []);
+        views[name] = String(rows[0]?.n ?? '?');
+      } catch (e) {
+        views[name] = `FAILED: ${e instanceof Error ? e.message : String(e)}`.slice(0, 120);
+        database = 'degraded';
+      }
+    }
   } catch (e) {
     database = `error: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200);
   }
@@ -51,6 +74,6 @@ export async function GET() {
 
   return NextResponse.json({
     ok: Object.values(env).every(Boolean) && database === 'ok',
-    deploy, env, checks, database,
+    deploy, today, env, checks, database, views,
   });
 }
