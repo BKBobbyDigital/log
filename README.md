@@ -44,6 +44,12 @@ and it still never sets the status for you — it just offers the choice.
     data/tracker.db   not in git
 
 ## Gotchas worth remembering
+- **Never ask the database what day it is.** `date('now')` is UTC and
+  `'localtime'` is the server's timezone, which on Turso is also UTC. Both say
+  "tomorrow" at 8pm in New York. The day comes from the application via a
+  named `:today` parameter — see `web/lib/sql.ts`.
+- **Schema changes follow a deploy, never precede it.** Dropping views while
+  the running app still queried them took production down.
 - **Days are local, not UTC.** A 10pm watch in New York is 02:00 UTC the next
   day. Using UTC broke a 405-day streak into 99. See `watch.local_day`.
 - **75% of history is backfill.** 25,209 plays were bulk-imported from Plex
