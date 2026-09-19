@@ -8,6 +8,8 @@ import { UpNextCard, CalendarCard, WatchlistCard } from '@/components/Cards';
 import StreakBar from '@/components/StreakBar';
 import Revived from '@/components/Revived';
 import FilterTabs from '@/components/FilterTabs';
+import ListNav from '@/components/ListNav';
+import { allCounts } from '@/lib/lists';
 import { requireAuth } from '@/lib/auth';
 
 // reads the DB on every request; server actions revalidate this path
@@ -28,11 +30,12 @@ export default async function Home({
   const streak = await getStreak();
   const days = await getRecentDays();
   const stats = await getStats();
+  const counts = await allCounts(filter);
 
   return (
     <main>
-      <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border
-                         bg-background/85 px-4 py-3 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-border bg-background/85 backdrop-blur">
+        <div className="flex items-center gap-3 px-4 py-3">
         <h1 className="text-lg font-bold tracking-tight">LOG</h1>
         <div className="ml-auto flex items-center gap-2">
           <FilterTabs active={filter} />
@@ -45,6 +48,8 @@ export default async function Home({
             </svg>
           </Link>
         </div>
+        </div>
+        <ListNav counts={counts} type={filter} />
       </header>
 
       {revived.length > 0 && <Revived items={revived} />}
