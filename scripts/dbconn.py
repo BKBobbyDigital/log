@@ -10,7 +10,8 @@ auto_finish.py untouched -- only the connection changes.
 Turso when TURSO_DATABASE_URL is set, otherwise data/tracker.db.
 Pass --local to force the file even when Turso is configured.
 """
-import os, sqlite3, sys
+import datetime, os, sqlite3, sys
+from zoneinfo import ZoneInfo
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -63,7 +64,8 @@ class TursoConn:
     def execute(self, sql, params=()):
         if sql.strip().upper().startswith('PRAGMA'):
             return _Result([])            # meaningless against a remote database
-        rs = self._c.execute(sql, list(params))
+        args = params if isinstance(params, dict) else list(params)
+        rs = self._c.execute(sql, args)
         return _Result([tuple(r) for r in rs.rows],
                        getattr(rs, 'last_insert_rowid', None),
                        getattr(rs, 'rows_affected', -1))
@@ -92,6 +94,17 @@ def connect(force_local=False):
     con.execute('PRAGMA journal_mode=WAL')
     con.execute('PRAGMA foreign_keys=ON')
     return con
+
+
+def local_today():
+    """Today in the user's timezone.
+
+    Never ask the database — date('now') is UTC, and 'localtime' is the
+    server's timezone, which on Turso is also UTC. At 8pm in New York both
+    answer "tomorrow". Same root cause as the streak bug.
+    """
+    tz = ZoneInfo(_env().get('LOCAL_TZ', 'UTC'))
+    return datetime.datetime.now(tz).date().isoformat()
 
 
 def tmdb_key():

@@ -13,7 +13,7 @@ import os, sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dbconn import connect
+from dbconn import connect, local_today
 
 FIND = """
 SELECT m.id, m.title, m.status, m.show_status,
@@ -27,7 +27,7 @@ WHERE m.type = 'show'
   AND NOT EXISTS (
         SELECT 1 FROM episode e
         WHERE e.media_id = m.id AND e.season > 0
-          AND e.air_date IS NOT NULL AND e.air_date <= date('now')
+          AND e.air_date IS NOT NULL AND e.air_date <= :today
           AND NOT EXISTS (SELECT 1 FROM watch w WHERE w.episode_id = e.id))
 ORDER BY m.title
 """
@@ -43,7 +43,7 @@ def main():
             con.execute("DELETE FROM status_change WHERE id=?", (cid,))
         con.commit(); print("reverted %d auto-finished shows" % len(rows)); return
 
-    rows = con.execute(FIND).fetchall()
+    rows = con.execute(FIND, {'today': local_today()}).fetchall()
     print("%d show(s) ended or canceled with every aired episode watched:\n" % len(rows))
     for _, title, _, ss, seen in rows:
         print("  %-46s %-9s %4d eps" % (title[:46], ss, seen))

@@ -1,6 +1,8 @@
 import 'server-only';
 import { q, one } from './client';
 import type { Filter } from './db';
+import { localDay } from './db';
+import { UP_NEXT, BETWEEN_SEASONS } from './sql';
 
 /** The named views. Each is a query over (media.status, watch) — nothing here
  *  is a stored list, so none of it can rot the way hand-maintained lists do. */
@@ -32,14 +34,14 @@ export const LISTS: Record<ListSlug, Def> = {
     title: 'Up next',
     blurb: 'An episode has aired that you have not watched.',
     showsOnly: true,
-    from: `FROM up_next u JOIN media m ON m.id = u.media_id`,
+    from: `FROM (${UP_NEXT}) u JOIN media m ON m.id = u.media_id`,
     defaultSort: 'recent',
   },
   'airing': {
     title: 'Airing',
     blurb: 'Caught up, and the next episode already has a date.',
     showsOnly: true,
-    from: `FROM between_seasons b JOIN media m ON m.id = b.media_id
+    from: `FROM (${BETWEEN_SEASONS}) b JOIN media m ON m.id = b.media_id
            WHERE b.returns_on IS NOT NULL`,
     defaultSort: 'returns',
   },
@@ -47,7 +49,7 @@ export const LISTS: Record<ListSlug, Def> = {
     title: 'Between seasons',
     blurb: 'Caught up, with nothing announced yet.',
     showsOnly: true,
-    from: `FROM between_seasons b JOIN media m ON m.id = b.media_id
+    from: `FROM (${BETWEEN_SEASONS}) b JOIN media m ON m.id = b.media_id
            WHERE b.returns_on IS NULL`,
     defaultSort: 'recent',
   },
@@ -80,13 +82,15 @@ export type ListRow = {
   plays: number;
 };
 
-function build(slug: ListSlug, type: Filter, sort: SortKey) {
+function build(slug: ListSlug, type: Filter) {
   const def = LISTS[slug];
-  const args: (string | number)[] = [];
+  // named args throughout: :today may appear many times inside a fragment
+  const args: Record<string, string | number> = {};
+  if (def.from.includes(':today')) args.today = localDay();
   let where = '';
   if (type !== 'all' && !def.showsOnly) {
-    where = def.from.includes('WHERE') ? ' AND m.type = ?' : ' WHERE m.type = ?';
-    args.push(type === 'shows' ? 'show' : 'movie');
+    where = def.from.includes('WHERE') ? ' AND m.type = :mtype' : ' WHERE m.type = :mtype';
+    args.mtype = type === 'shows' ? 'show' : 'movie';
   }
   return { def, where, args };
 }
@@ -94,7 +98,7 @@ function build(slug: ListSlug, type: Filter, sort: SortKey) {
 export async function getList(
   slug: ListSlug, type: Filter = 'all', sort?: SortKey, limit = 60, offset = 0,
 ): Promise<ListRow[]> {
-  const { def, where, args } = build(slug, type, sort ?? LISTS[slug].defaultSort);
+  const { def, where, args } = build(slug, type);
   const order = SORTS[sort ?? def.defaultSort] ?? SORTS[def.defaultSort];
   return q<ListRow>(`
     SELECT m.id AS media_id, m.type, m.title, m.year, m.poster_path, m.runtime,
@@ -109,11 +113,11 @@ export async function getList(
            (SELECT COUNT(*) FROM watch w WHERE w.media_id = m.id) AS plays
     ${def.from}${where}
     ORDER BY ${order}
-    LIMIT ? OFFSET ?`, [...args, limit, offset]);
+    LIMIT :limit OFFSET :offset`, { ...args, limit, offset });
 }
 
 export async function countList(slug: ListSlug, type: Filter = 'all'): Promise<number> {
-  const { def, where, args } = build(slug, type, LISTS[slug].defaultSort);
+  const { def, where, args } = build(slug, type);
   const r = await one<{ n: number }>(
     `SELECT COUNT(*) AS n ${def.from}${where}`, args);
   return r?.n ?? 0;

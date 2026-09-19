@@ -1,5 +1,6 @@
 import 'server-only';
 import { q, one, run, batch } from './client';
+import { UP_NEXT, CALENDAR, BETWEEN_SEASONS, REVIVED, EPISODE_GAPS } from './sql';
 import { conf } from './config';
 
 // JS and the Python scripts must agree on where a day starts — see README.
@@ -65,10 +66,21 @@ export type EpisodeRow = {
 // ─── home rails ──────────────────────────────────────────────────────────────
 
 export const getUpNext = () =>
-  q<UpNextItem>(`SELECT * FROM up_next ORDER BY never_started ASC, last_watched_at DESC`);
+  q<UpNextItem>(`SELECT * FROM (${UP_NEXT}) ORDER BY never_started ASC, last_watched_at DESC`,
+                { today: localDay() });
 
-export const getCalendar = (limit = 30) =>
-  q<CalendarItem>(`SELECT * FROM calendar_upcoming ORDER BY air_date, show_title LIMIT ?`, [limit]);
+export async function getCalendar(limit = 30): Promise<CalendarItem[]> {
+  const today = localDay();
+  const rows = await q<Omit<CalendarItem, 'days_away'>>(
+    `SELECT * FROM (${CALENDAR}) ORDER BY air_date, show_title LIMIT :limit`,
+    { today, limit });
+  // days in the viewer's timezone, not the database's
+  const base = Date.parse(today + 'T00:00:00Z');
+  return rows.map(r => ({
+    ...r,
+    days_away: Math.round((Date.parse(r.air_date + 'T00:00:00Z') - base) / 86400_000),
+  }));
+}
 
 export function getWatchlist(filter: Filter = 'all', limit = 40) {
   const args: (string | number)[] = [];
@@ -82,12 +94,15 @@ export function getWatchlist(filter: Filter = 'all', limit = 40) {
 /** Finished shows that have since aired new episodes — the counterpart to
  *  auto-finish. Without it a revived show would stay buried. */
 export const getRevived = () =>
-  q<RevivedItem>(`SELECT * FROM revived ORDER BY first_new_air_date DESC`);
+  q<RevivedItem>(`SELECT * FROM (${REVIVED}) ORDER BY first_new_air_date DESC`,
+                 { today: localDay() });
 
 /** status=watching, caught up, not over. Label only — status is untouched. */
 export const getBetweenSeasons = () =>
   q<BetweenSeasonsItem>(
-    `SELECT * FROM between_seasons ORDER BY (returns_on IS NULL), returns_on, last_watched_at DESC`);
+    `SELECT * FROM (${BETWEEN_SEASONS})
+     ORDER BY (returns_on IS NULL), returns_on, last_watched_at DESC`,
+    { today: localDay() });
 
 export async function getStreak() {
   const today = localDay();
@@ -133,18 +148,18 @@ export const getSeasons = (mediaId: number) =>
   q<SeasonRow>(`
     SELECT e.season,
            COUNT(*) AS episodes,
-           SUM(CASE WHEN e.air_date IS NOT NULL AND e.air_date <= date('now') THEN 1 ELSE 0 END) AS aired,
+           SUM(CASE WHEN e.air_date IS NOT NULL AND e.air_date <= :today THEN 1 ELSE 0 END) AS aired,
            SUM(CASE WHEN EXISTS (SELECT 1 FROM watch w WHERE w.episode_id = e.id) THEN 1 ELSE 0 END) AS watched
-    FROM episode e WHERE e.media_id = ?
-    GROUP BY e.season ORDER BY e.season`, [mediaId]);
+    FROM episode e WHERE e.media_id = :mediaId
+    GROUP BY e.season ORDER BY e.season`, { mediaId, today: localDay() });
 
 export const getEpisodes = (mediaId: number, season: number) =>
   q<EpisodeRow>(`
     SELECT e.id, e.season, e.number, e.title, e.air_date, e.runtime, e.still_path,
            (SELECT COUNT(*) FROM watch w WHERE w.episode_id = e.id) AS plays,
            (SELECT r.rating FROM rating r WHERE r.episode_id = e.id) AS rating
-    FROM episode e WHERE e.media_id = ? AND e.season = ?
-    ORDER BY e.number`, [mediaId, season]);
+    FROM episode e WHERE e.media_id = :mediaId AND e.season = :season
+    ORDER BY e.number`, { mediaId, season });
 
 export async function getShowProgress(mediaId: number) {
   return (await one<{
@@ -152,13 +167,13 @@ export async function getShowProgress(mediaId: number) {
   }>(`
     SELECT
       (SELECT COUNT(*) FROM episode e WHERE e.media_id = m.id AND e.season > 0
-         AND e.air_date IS NOT NULL AND e.air_date <= date('now')) AS aired,
+         AND e.air_date IS NOT NULL AND e.air_date <= :today) AS aired,
       (SELECT COUNT(DISTINCT w.episode_id) FROM watch w JOIN episode e ON e.id = w.episode_id
          WHERE w.media_id = m.id AND e.season > 0) AS watched,
       (SELECT COUNT(*) FROM watch w WHERE w.media_id = m.id) AS plays,
-      (SELECT COUNT(*) FROM episode_gaps g WHERE g.media_id = m.id) AS gaps,
+      (SELECT COUNT(*) FROM (${EPISODE_GAPS}) g WHERE g.media_id = m.id) AS gaps,
       (SELECT MAX(watched_at) FROM watch w WHERE w.media_id = m.id) AS last_watched_at
-    FROM media m WHERE m.id = ?`, [mediaId]))!;
+    FROM media m WHERE m.id = :mediaId`, { mediaId, today: localDay() }))!;
 }
 
 export const getPlays = (mediaId: number, limit = 50) =>
@@ -227,9 +242,10 @@ export async function markWatchedOn(
 export async function markSeasonWatched(mediaId: number, season: number): Promise<number> {
   const rows = await q<{ id: number }>(`
     SELECT e.id FROM episode e
-    WHERE e.media_id = ? AND e.season = ?
-      AND e.air_date IS NOT NULL AND e.air_date <= date('now')
-      AND NOT EXISTS (SELECT 1 FROM watch w WHERE w.episode_id = e.id)`, [mediaId, season]);
+    WHERE e.media_id = :mediaId AND e.season = :season
+      AND e.air_date IS NOT NULL AND e.air_date <= :today
+      AND NOT EXISTS (SELECT 1 FROM watch w WHERE w.episode_id = e.id)`,
+    { mediaId, season, today: localDay() });
   const day = localDay();
   await batch(rows.map(r => ({
     sql: `INSERT INTO watch (media_id, episode_id, watched_at, is_backfill, local_day)

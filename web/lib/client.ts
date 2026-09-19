@@ -1,5 +1,5 @@
 import 'server-only';
-import { createClient, type Client, type InValue } from '@libsql/client';
+import { createClient, type Client, type InArgs } from '@libsql/client';
 import path from 'node:path';
 import { conf, looksMasked, nonAscii } from './config';
 
@@ -45,7 +45,7 @@ function normalise(v: unknown): unknown {
   return typeof v === 'bigint' ? Number(v) : v;
 }
 
-export async function q<T>(sql: string, args: InValue[] = []): Promise<T[]> {
+export async function q<T>(sql: string, args: InArgs = []): Promise<T[]> {
   const res = await db().execute({ sql, args });
   // Read columns POSITIONALLY. libSQL rows are array-like, so row['length']
   // returns the array's own length rather than a column called "length" —
@@ -57,14 +57,14 @@ export async function q<T>(sql: string, args: InValue[] = []): Promise<T[]> {
   });
 }
 
-export async function one<T>(sql: string, args: InValue[] = []): Promise<T | null> {
+export async function one<T>(sql: string, args: InArgs = []): Promise<T | null> {
   return (await q<T>(sql, args))[0] ?? null;
 }
 
-export async function run(sql: string, args: InValue[] = []): Promise<void> {
+export async function run(sql: string, args: InArgs = []): Promise<void> {
   await db().execute({ sql, args });
 }
 
-export async function batch(stmts: { sql: string; args: InValue[] }[]): Promise<void> {
+export async function batch(stmts: { sql: string; args: InArgs }[]): Promise<void> {
   if (stmts.length) await db().batch(stmts, 'write');
 }
