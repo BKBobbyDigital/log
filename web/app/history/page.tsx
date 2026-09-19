@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { requireAuth } from '@/lib/auth';
-import { getHistory, countHistory, allCounts, type HistoryRow } from '@/lib/lists';
+import { getHistory, countHistory, type HistoryRow } from '@/lib/library';
 import { poster } from '@/lib/tmdb';
-import type { Filter } from '@/lib/db';
-import ListNav from '@/components/ListNav';
+import type { TypeFilter } from '@/lib/library';
+import AppNav from '@/components/AppNav';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,14 +37,13 @@ export default async function HistoryPage({
 }: { searchParams: Promise<{ type?: string; all?: string; offset?: string }> }) {
   await requireAuth();
   const sp = await searchParams;
-  const type: Filter = sp.type === 'shows' || sp.type === 'movies' ? sp.type : 'all';
+  const type: TypeFilter = sp.type === 'shows' || sp.type === 'movies' ? sp.type : 'all';
   const includeBackfill = sp.all === '1';
   const offset = Math.max(0, Number(sp.offset ?? 0) || 0);
 
-  const [rows, total, counts] = await Promise.all([
+  const [rows, total] = await Promise.all([
     getHistory(type, includeBackfill, PAGE, offset),
     countHistory(type, includeBackfill),
-    allCounts(type),
   ]);
   const days = groupByDay(rows);
 
@@ -59,21 +58,7 @@ export default async function HistoryPage({
 
   return (
     <main className="pb-20">
-      <header className="sticky top-0 z-10 border-b border-border bg-background/85 backdrop-blur">
-        <div className="flex items-center gap-3 px-4 py-3">
-          <Link href="/" className="text-lg font-bold tracking-tight">LOG</Link>
-          <div className="ml-auto flex gap-1 rounded-full border border-border bg-surface p-1">
-            {(['all', 'shows', 'movies'] as Filter[]).map(t => (
-              <Link key={t} href={`/history${t === 'all' ? '' : `?type=${t}`}`}
-                className={`rounded-full px-3 py-1 text-sm font-medium ${
-                  type === t ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-                {t === 'all' ? 'Media' : t === 'shows' ? 'Shows' : 'Movies'}
-              </Link>
-            ))}
-          </div>
-        </div>
-        <ListNav active="history" counts={counts} type={type} />
-      </header>
+      <AppNav active="/history" />
 
       <div className="flex items-baseline gap-3 px-4 pt-4">
         <div>
@@ -92,7 +77,7 @@ export default async function HistoryPage({
 
       {days.map(({ day, rows }) => (
         <section key={day} className="pt-5">
-          <h2 className="sticky top-[104px] z-[5] bg-background/90 px-4 py-1 text-xs
+          <h2 className="sticky top-[56px] z-[5] bg-background/90 px-4 py-1 text-xs
                          font-semibold uppercase tracking-wide text-muted backdrop-blur">
             {dayLabel(day)} <span className="font-normal normal-case">· {rows.length}</span>
           </h2>

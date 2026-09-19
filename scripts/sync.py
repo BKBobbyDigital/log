@@ -257,11 +257,8 @@ def main():
 
     con.close()
 
-    if not DRY:
-        print("\n--- auto-finish ---")
-        sys.stdout.flush()
-        os.system('%s %s --apply' % (sys.executable,
-                                     os.path.join(HERE, 'scripts', 'auto_finish.py')))
+    # No auto-finish. Status is yours alone; the library shows each show's
+    # situation ("Ended · all watched") and you change it when you want to.
 
 
 if __name__ == '__main__':

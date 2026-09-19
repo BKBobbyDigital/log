@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import {
   markWatched, markWatchedOn, markSeasonWatched, unmarkLatest, unmarkWatch,
-  setStatus, setRating, dismissDecision,
+  setStatus, setRating,
 } from '@/lib/db';
 import { addToLibrary } from '@/lib/tmdbApi';
 
@@ -30,9 +30,6 @@ export async function setStatusAction(mediaId: number, status: string) {
 }
 export async function setRatingAction(mediaId: number, rating: number | null) {
   await setRating(mediaId, rating); refresh();
-}
-export async function dismissDecisionAction(mediaId: number) {
-  await dismissDecision(mediaId); refresh();
 }
 export async function addToLibraryAction(tmdbId: number, type: 'movie' | 'show', status: string) {
   const id = await addToLibrary(tmdbId, type, status); refresh(); return id;

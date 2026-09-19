@@ -1,6 +1,6 @@
 import 'server-only';
 import { q, one, run, batch } from './client';
-import { UP_NEXT, CALENDAR, BETWEEN_SEASONS, REVIVED, EPISODE_GAPS } from './sql';
+import { UP_NEXT, CALENDAR, EPISODE_GAPS } from './sql';
 import { conf } from './config';
 
 // JS and the Python scripts must agree on where a day starts — see README.
@@ -33,18 +33,6 @@ export type WatchlistItem = {
   media_id: number; type: MediaType; title: string; year: number | null;
   poster_path: string | null; runtime: number | null; tmdb_rating: number | null;
   show_status: string | null; status_set_at: string | null;
-};
-
-export type RevivedItem = {
-  media_id: number; title: string; poster_path: string | null;
-  show_status: string | null; new_episodes: number;
-  first_new_air_date: string; last_watched_at: string | null;
-};
-
-export type BetweenSeasonsItem = {
-  media_id: number; title: string; poster_path: string | null;
-  show_status: string | null; returns_on: string | null;
-  last_watched_at: string | null;
 };
 
 export type MediaDetail = {
@@ -90,19 +78,6 @@ export function getWatchlist(filter: Filter = 'all', limit = 40) {
   return q<WatchlistItem>(
     `SELECT * FROM watchlist_rail ${where} ORDER BY status_set_at DESC LIMIT ?`, args);
 }
-
-/** Finished shows that have since aired new episodes — the counterpart to
- *  auto-finish. Without it a revived show would stay buried. */
-export const getRevived = () =>
-  q<RevivedItem>(`SELECT * FROM (${REVIVED}) ORDER BY first_new_air_date DESC`,
-                 { today: localDay() });
-
-/** status=watching, caught up, not over. Label only — status is untouched. */
-export const getBetweenSeasons = () =>
-  q<BetweenSeasonsItem>(
-    `SELECT * FROM (${BETWEEN_SEASONS})
-     ORDER BY (returns_on IS NULL), returns_on, last_watched_at DESC`,
-    { today: localDay() });
 
 export async function getStreak() {
   const today = localDay();
@@ -282,12 +257,6 @@ export async function setRating(mediaId: number, rating: number | null) {
       SET rating = excluded.rating, rated_at = excluded.rated_at`, [mediaId, rating]);
 }
 
-/** "Not now" — records WHICH status was dismissed, so the prompt comes back
- *  by itself if the show later changes (Returning Series -> Canceled). */
-export const dismissDecision = (mediaId: number) =>
-  run(`UPDATE media SET decision_dismissed_at = datetime('now'),
-                        decision_dismissed_status = show_status
-       WHERE id = ?`, [mediaId]);
 
 export async function findByTmdb(type: MediaType, tmdbId: number): Promise<number | null> {
   const r = await one<{ id: number }>(

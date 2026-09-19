@@ -1,81 +1,81 @@
-import {
-  getUpNext, getCalendar, getWatchlist, getRevived,
-  getStreak, getRecentDays, getStats, type Filter,
-} from '@/lib/db';
 import Link from 'next/link';
-import Rail from '@/components/Rail';
-import { UpNextCard, CalendarCard, WatchlistCard } from '@/components/Cards';
-import StreakBar from '@/components/StreakBar';
-import Revived from '@/components/Revived';
-import FilterTabs from '@/components/FilterTabs';
-import ListNav from '@/components/ListNav';
-import { allCounts } from '@/lib/lists';
 import { requireAuth } from '@/lib/auth';
+import { getUpNext, getCalendar, getStreak, getRecentDays } from '@/lib/db';
+import { getLibrary } from '@/lib/library';
+import AppNav from '@/components/AppNav';
+import StreakBar from '@/components/StreakBar';
+import PosterCard from '@/components/PosterCard';
+import { UpNextCard, AiringCard } from '@/components/NowCards';
 
-// reads the DB on every request; server actions revalidate this path
 export const dynamic = 'force-dynamic';
 
-export default async function Home({
-  searchParams,
-}: { searchParams: Promise<{ filter?: string }> }) {
+/** Now: the decision screen. What can I watch, what lands this week, what is
+ *  waiting to be started. Everything else lives in Library or History. */
+export default async function Now() {
   await requireAuth();
-  const { filter: raw } = await searchParams;
-  const filter: Filter = raw === 'shows' || raw === 'movies' ? raw : 'all';
-  const showTV = filter !== 'movies';
 
-  const upNext = showTV ? await getUpNext() : [];
-  const calendar = showTV ? await getCalendar() : [];
-  const watchlist = await getWatchlist(filter);
-  const revived = showTV ? await getRevived() : [];
-  const streak = await getStreak();
-  const days = await getRecentDays();
-  const stats = await getStats();
-  const counts = await allCounts(filter);
+  const [upNext, calendar, streak, days, watchlist] = await Promise.all([
+    getUpNext(),
+    getCalendar(40),
+    getStreak(),
+    getRecentDays(),
+    getLibrary({ status: 'watchlist', sort: 'added', limit: 20 }),
+  ]);
+
+  const thisWeek = calendar.filter(c => c.days_away <= 7);
 
   return (
-    <main>
-      <header className="sticky top-0 z-10 border-b border-border bg-background/85 backdrop-blur">
-        <div className="flex items-center gap-3 px-4 py-3">
-        <h1 className="text-lg font-bold tracking-tight">LOG</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <FilterTabs active={filter} />
-          <Link href="/search" aria-label="Search"
-            className="grid size-9 place-items-center rounded-full border border-border
-                       bg-surface text-muted hover:border-accent hover:text-accent">
-            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor"
-                 strokeWidth={2.2} strokeLinecap="round">
-              <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
-            </svg>
-          </Link>
-        </div>
-        </div>
-        <ListNav counts={counts} type={filter} />
-      </header>
+    <main className="pb-20">
+      <AppNav active="/" />
 
-      {revived.length > 0 && <Revived items={revived} />}
-
-      <Rail title="Up Next" count={upNext.length}
-            empty={showTV
-              ? "You're caught up on everything. Shows come back on their own when a new episode airs."
-              : 'Switch to Shows or Media to see episodes.'}>
+      <Section title="Up next" count={upNext.length}
+               empty="You're caught up. Shows come back on their own when a new episode airs.">
         {upNext.map(i => <UpNextCard key={i.episode_id} item={i} />)}
-      </Rail>
+      </Section>
+
+      <Section title="This week" count={thisWeek.length}
+               more={{ href: '/library?type=shows&status=watching', label: 'All' }}
+               empty="Nothing airing in the next seven days.">
+        {thisWeek.map(i => <AiringCard key={i.episode_id} item={i} />)}
+      </Section>
 
       {streak && <StreakBar length={streak.length} days={days} />}
 
-      <Rail title="Calendar" count={calendar.length}
-            empty="Nothing scheduled for the shows you're watching.">
-        {calendar.map(i => <CalendarCard key={i.episode_id} item={i} />)}
-      </Rail>
-
-      <Rail title="Watchlist" count={watchlist.length} empty="Nothing on the watchlist.">
-        {watchlist.map(i => <WatchlistCard key={i.media_id} item={i} />)}
-      </Rail>
-
-      <footer className="px-4 py-6 text-xs text-muted">
-        {stats.episodes.toLocaleString()} episodes · {stats.movies.toLocaleString()} movies ·{' '}
-        {stats.watching} watching · {stats.watchlist} on the watchlist
-      </footer>
+      <Section title="Want to watch" count={watchlist.length}
+               more={{ href: '/library?status=watchlist', label: 'All' }}
+               empty="Nothing on the watchlist.">
+        {watchlist.map(i => (
+          <div key={i.media_id} className="w-[124px]"><PosterCard item={i} /></div>
+        ))}
+      </Section>
     </main>
+  );
+}
+
+function Section({
+  title, count, children, empty, more,
+}: {
+  title: string; count: number; children: React.ReactNode; empty: string;
+  more?: { href: string; label: string };
+}) {
+  return (
+    <section className="py-3">
+      <div className="mb-3 flex items-baseline gap-2 px-4">
+        <h2 className="text-[17px] font-semibold tracking-tight">{title}</h2>
+        {count > 0 && (
+          <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">
+            {count}
+          </span>
+        )}
+        {more && count > 0 && (
+          <Link href={more.href} className="ml-auto text-sm text-muted hover:text-accent">
+            {more.label}
+          </Link>
+        )}
+      </div>
+      {count > 0
+        ? <div className="rail">{children}</div>
+        : <p className="px-4 text-sm text-muted">{empty}</p>}
+    </section>
   );
 }
